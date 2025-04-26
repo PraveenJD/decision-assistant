@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+html,
+body {
+  font-family: "Poppins", sans-serif;
+}
+
+body {
+  color: #374151;
+}
+
+/* For WebKit browsers (Chrome, Safari) */
+::-webkit-scrollbar {
+  width: 8px; /* Width of the scrollbar */
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1; /* Background color of the scrollbar track */
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    45deg,
+    #3a66aa,
+    #43bfca,
+    #3f9cd6
+  ); /* Gradient color of the scrollbar thumb */
+  border-radius: 6px; /* Rounded corners for the scrollbar thumb */
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(
+    45deg,
+    #3a66aa,
+    #43bfca,
+    #3f9cd6
+  ); /* Hover effect for the scrollbar thumb */
+}
+
+/* For Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #3a66aa #f1f1f1; /* Colors: thumb and track */
+}
