@@ -30,8 +30,6 @@ const ChatTab = () => {
     pdfs = [],
   } = extractedFilesData || {};
 
-  console.log(homePageData);
-
   const endRef = useRef<HTMLDivElement | null>(null);
 
   const [questionVal, setQuestionVal] = useState("");

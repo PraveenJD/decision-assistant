@@ -120,15 +120,17 @@ const MindMap: FC<MindMapProps> = ({ data }) => {
       .attr("stroke", "#7dd3fc")
       .attr("stroke-width", 1);
 
-    // const text = labelGroup
-    //   .append("text")
-    //   .text((d) => d.data.name)
-    //   .attr("x", 0)
-    //   .attr("y", -18)
-    //   .style("font-size", "12px")
-    //   .style("font-family", "sans-serif")
-    //   .style("text-anchor", "middle")
-    //   .style("fill", "#000");
+    const text = labelGroup
+      .append("text")
+      .text((d) => d.data.name)
+      .attr("x", 0)
+      .attr("y", -18)
+      .style("font-size", "12px")
+      .style("font-family", "sans-serif")
+      .style("text-anchor", "middle")
+      .style("fill", "#000");
+
+    console.log(text);
 
     node.each(function () {
       const textEl = d3.select(this).select("text").node() as SVGTextElement;
