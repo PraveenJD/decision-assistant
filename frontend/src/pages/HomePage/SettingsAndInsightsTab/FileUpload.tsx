@@ -3,18 +3,33 @@ import React, { useState, DragEvent } from "react";
 import { FiUpload } from "react-icons/fi";
 import { FaRegFileAlt } from "react-icons/fa";
 import { IoIosArrowDown } from "react-icons/io";
-import { Button } from "@mui/material";
+// import { Button } from "@mui/material";
 import { FaRegFilePdf } from "react-icons/fa6";
 import { FaRegFileWord } from "react-icons/fa";
+import * as XLSX from "xlsx";
+import mammoth from "mammoth";
+import { useHomePageContext } from "../../../hooks/HomePageContext";
+import { ExtractedFilesData } from "../../../hooks/HomePageContext/HomePageProvider";
+import { Column } from "../WorkspaceTab/DataViewTab/Table";
 
-const FileUpload: React.FC = () => {
+export type ExtractedFileData = {
+  fileName: string;
+  columns: Column[];
+  data: Record<string, any>[];
+};
+
+const FileUpload = () => {
+  const { homePageData, setHomePageData } = useHomePageContext();
+
+  const { extractedFilesData } = homePageData || {};
+
   const [files, setFiles] = useState<File[]>([]);
   const [isOpen, setIsOpen] = useState(true);
 
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     const uploadedFiles = Array.from(event.dataTransfer.files);
-    setFiles((prevFiles) => [...prevFiles, ...uploadedFiles]);
+    handleFileUpload(uploadedFiles);
   };
 
   const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
@@ -24,11 +39,216 @@ const FileUpload: React.FC = () => {
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files) {
       const uploadedFiles = Array.from(event.target.files);
-      setFiles((prevFiles) => [...prevFiles, ...uploadedFiles]);
+      handleFileUpload(uploadedFiles);
     }
   };
 
   const handleIsOpen = () => setIsOpen((prevVal) => !prevVal);
+
+  const hasData = (data: ExtractedFilesData) => {
+    return (
+      data.pdfs.length > 0 ||
+      data.excel.length > 0 ||
+      data.csv.length > 0 ||
+      data.docx.length > 0
+    );
+  };
+
+  const extractExcelColumnsAndData = (workbook: XLSX.WorkBook) => {
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const jsonData = XLSX.utils.sheet_to_json(sheet, {
+      header: 1,
+    }) as string[][]; // Assert the type here
+
+    const columns = jsonData[0].map((col: string, idx: number) => ({
+      header: col,
+      accessor: idx.toString(),
+    }));
+
+    const data = jsonData.slice(1).map((row: string[]) =>
+      row.reduce((acc: Record<string, any>, val: string, idx: number) => {
+        acc[idx.toString()] = val;
+        return acc;
+      }, {})
+    );
+
+    return { columns, data };
+  };
+
+  const extractCsvColumnsAndData = (csvData: any) => {
+    const columns = csvData[0].map((col: string, idx: number) => ({
+      header: col,
+      accessor: idx.toString(),
+    }));
+
+    const data = csvData.slice(1).map((row: any) =>
+      row.reduce((acc: Record<string, any>, val: any, idx: number) => {
+        acc[idx.toString()] = val;
+        return acc;
+      }, {})
+    );
+
+    return { columns, data };
+  };
+
+  const handleFileUpload = async (uploadedFiles: File[]) => {
+    const updatedFiles = [...files, ...uploadedFiles];
+    setFiles(updatedFiles);
+
+    const newExtractedData: ExtractedFilesData = {
+      pdfs: [],
+      excel: [],
+      csv: [],
+      docx: [],
+    };
+
+    const newExtractedFileData: ExtractedFileData[] = [];
+
+    for (const file of uploadedFiles) {
+      const ext = file.name.split(".").pop()?.toLowerCase();
+      try {
+        if (["xlsx", "xls"].includes(ext || "")) {
+          const workbook = await extractExcelData(file);
+          const extractedFileData = extractExcelColumnsAndData(workbook);
+
+          newExtractedData.excel.push({
+            filename: file.name,
+            content: workbook,
+          });
+          newExtractedFileData.push({
+            fileName: file.name,
+            columns: extractedFileData.columns,
+            data: extractedFileData.data,
+          });
+        } else if (ext === "csv") {
+          const csvData = await extractCsvData(file);
+          const extractedFileData = extractCsvColumnsAndData(csvData);
+
+          newExtractedData.csv.push({ filename: file.name, content: csvData });
+          newExtractedFileData.push({
+            fileName: file.name,
+            columns: extractedFileData.columns,
+            data: extractedFileData.data,
+          });
+        } else if (ext === "pdf") {
+          const pdfText = await extractPdfData(file);
+          newExtractedData.pdfs.push({ filename: file.name, content: pdfText });
+        } else if (ext === "docx") {
+          const docxText = await extractDocxData(file);
+          newExtractedData.docx.push({
+            filename: file.name,
+            content: docxText,
+          });
+        } else {
+          console.warn(`Unsupported file type: ${ext}`);
+        }
+      } catch (error) {
+        console.error(`Error processing file ${file.name}:`, error);
+      }
+    }
+
+    setHomePageData?.((prevData) => {
+      const mergedData: ExtractedFilesData = {
+        pdfs: [...(extractedFilesData?.pdfs || []), ...newExtractedData.pdfs],
+        excel: [
+          ...(extractedFilesData?.excel || []),
+          ...newExtractedData.excel,
+        ],
+        csv: [...(extractedFilesData?.csv || []), ...newExtractedData.csv],
+        docx: [...(extractedFilesData?.docx || []), ...newExtractedData.docx],
+      };
+
+      return {
+        ...prevData,
+        tableData: newExtractedFileData,
+        hasExtractedFiles: hasData(mergedData),
+        extractedFilesData: mergedData,
+      };
+    });
+  };
+
+  // Function to convert file to base64
+  const fileToBase64 = (file: File) => {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = (error) => reject(error);
+    });
+  };
+
+  // Function to extract text from PDF using Gemini
+  const extractPdfData = async (file: File) => {
+    try {
+      const base64Data = await fileToBase64(file);
+      const response = await fetch(
+        "https://llmfoundry.straive.com/gemini/v1beta/models/gemini-2.0-flash:generateContent",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InByYXZlZW4ua3VtYXJAZ3JhbWVuZXIuY29tIn0.x396P1tXJBjZaji4y4SFwsWdbiHfcpzNXOfKM64k4qs`,
+          },
+          body: JSON.stringify({
+            system_instruction: {
+              parts: [
+                { text: "Extract the text content from the provided PDF." },
+              ],
+            },
+            contents: [
+              {
+                role: "user",
+                parts: [
+                  {
+                    inlineData: {
+                      mimeType: "application/pdf",
+                      data: base64Data,
+                    },
+                  },
+                ],
+              },
+            ],
+          }),
+        }
+      );
+      const data = await response.json();
+      return data.candidates?.[0].content.parts?.[0].text;
+    } catch (error: any) {
+      console.error("Error extracting PDF:", error);
+      throw new Error(`Failed to extract PDF data: ${error.message}`);
+    }
+  };
+
+  // Function to extract data from Excel files
+  const extractExcelData = async (file: File) => {
+    const workbook = XLSX.read(new Uint8Array(await file.arrayBuffer()), {
+      type: "array",
+    });
+    return workbook;
+  };
+
+  // Function to extract data from CSV files
+  const extractCsvData = async (file: File) => {
+    const csvData = await file.text();
+    const workbook = XLSX.read(csvData, { type: "string" });
+    return workbook.SheetNames.map((sheetName) => ({
+      sheetName,
+      data: XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1 }),
+    }));
+  };
+
+  // Function to extract data from DOCX files
+  const extractDocxData = async (file: File) => {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const result = await mammoth.extractRawText({ arrayBuffer });
+      return result.value;
+    } catch (error: any) {
+      console.error("Error extracting DOCX:", error);
+      throw new Error(`Failed to extract DOCX data: ${error.message}`);
+    }
+  };
 
   return (
     <div className="p-2 bg-white rounded border border-gray-200">
@@ -45,7 +265,7 @@ const FileUpload: React.FC = () => {
           onClick={handleIsOpen}
         />
       </div>
-      {isOpen ? (
+      {isOpen && (
         <div>
           <div
             onDragOver={handleDragOver}
@@ -61,13 +281,13 @@ const FileUpload: React.FC = () => {
           <input
             id="fileInput"
             type="file"
-            accept=".pdf,.doc,.docx"
+            accept=".pdf,.doc,.docx,.xlsx,.xls,.csv"
             multiple
             className="hidden"
             onChange={handleFileChange}
           />
 
-          {files.length > 0 ? (
+          {files.length > 0 && (
             <div className="mt-6">
               <h3 className="text-lg font-semibold">Uploaded Files:</h3>
               <ul className="mt-2 space-y-2">
@@ -84,10 +304,7 @@ const FileUpload: React.FC = () => {
                       )}
                       <span className="text-gray-700">{file.name}</span>
                     </div>
-                    {/* <span className="text-sm text-gray-500">
-                    {(file.size / 1024).toFixed(2)} KB
-                  </span> */}
-                    <Button
+                    {/* <Button
                       color="inherit"
                       style={{
                         textTransform: "none",
@@ -98,14 +315,14 @@ const FileUpload: React.FC = () => {
                       variant="contained"
                     >
                       Index
-                    </Button>
+                    </Button> */}
                   </li>
                 ))}
               </ul>
             </div>
-          ) : null}
+          )}
         </div>
-      ) : null}
+      )}
     </div>
   );
 };

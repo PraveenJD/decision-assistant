@@ -3,58 +3,16 @@ import { Button } from "@mui/material";
 import { FaRegFileAlt } from "react-icons/fa";
 import { TbAntennaBars5 } from "react-icons/tb";
 import Table from "./Table";
-
-const columns = [
-  { header: "Header1", accessor: "header1" },
-  { header: "Header2", accessor: "header2" },
-  { header: "Header3", accessor: "header3" },
-  { header: "Header4", accessor: "header4" },
-  { header: "Header5", accessor: "header5" },
-];
-
-const data = [
-  {
-    header1: "Sample1",
-    header2: "Sample1",
-    header3: "Sample1",
-    header4: "Sample1",
-    header5: "Sample1",
-  },
-  {
-    header1: "Sample2",
-    header2: "Sample1",
-    header3: "Sample1",
-    header4: "Sample1",
-    header5: "Sample1",
-  },
-  {
-    header1: "Sample3",
-    header2: "Sample1",
-    header3: "Sample1",
-    header4: "Sample1",
-    header5: "Sample1",
-  },
-  {
-    header1: "Sample4",
-    header2: "Sample1",
-    header3: "Sample1",
-    header4: "Sample1",
-    header5: "Sample1",
-  },
-  {
-    header1: "Sample5",
-    header2: "Sample1",
-    header3: "Sample1",
-    header4: "Sample1",
-    header5: "Sample1",
-  },
-];
+import { useHomePageContext } from "../../../../hooks/HomePageContext";
 
 const DataViewTab = () => {
+  const { homePageData } = useHomePageContext();
+  const { tableData = [] } = homePageData || {};
+
   return (
     <div className="flex-1 flex flex-col gap-3 overflow-auto p-3 bg-gray-100">
       <div className="bg-white border border-gray-200 rounded p-3">
-        <div className="flex justify-between">
+        <div className="flex justify-between mb-5">
           <h6 className="font-semibold">Cohort B Data Summary</h6>
           <div className="flex gap-3">
             <Button
@@ -85,11 +43,24 @@ const DataViewTab = () => {
             </Button>
           </div>
         </div>
-        <Table columns={columns} data={data} />
+        {tableData.length > 0 ? (
+          <div className="flex flex-col gap-5">
+            {tableData?.map((data, index) =>
+              data.data.length > 0 ? (
+                <Table
+                  columns={data.columns}
+                  data={data.data}
+                  tableHeader={data.fileName}
+                  key={index}
+                />
+              ) : null
+            )}
+          </div>
+        ) : null}
       </div>
-      <div className="bg-white border border-gray-200 rounded p-3">
+      {/* <div className="bg-white border border-gray-200 rounded p-3">
         <h6 className="font-semibold">Dose Response Visualization:</h6>
-      </div>
+      </div> */}
     </div>
   );
 };

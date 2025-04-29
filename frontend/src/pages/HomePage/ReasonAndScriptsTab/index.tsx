@@ -1,8 +1,16 @@
+import { useEffect, useRef } from "react";
+
 import { useHomePageContext } from "../../../hooks/HomePageContext";
 
 const ReasonAndScriptsTab = () => {
   const { homePageData } = useHomePageContext();
-  const { experts } = homePageData || {};
+  const { experts = [] } = homePageData || {};
+
+  const endRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [experts]);
 
   return (
     <div className="h-full w-1/4 bg-gray-50 p-3 flex flex-col">
@@ -20,9 +28,7 @@ const ReasonAndScriptsTab = () => {
             <div className="border-l-4 border-amber-500">
               {expert?.questionsAndAnswers?.map((data, qaIndex) => (
                 <p className="text-sm pl-2" key={qaIndex}>
-                  <span className="font-semibold">{`${qaIndex + 1}. ${
-                    data.question
-                  }`}</span>
+                  <span className="font-semibold">{data.question}</span>
                   <br />
                   {data.answer}
                 </p>
@@ -34,6 +40,8 @@ const ReasonAndScriptsTab = () => {
             </p>
           </div>
         ))}
+        <div ref={endRef} />
+        {/* dummy div ensures scrolling to bottom */}
       </div>
     </div>
   );

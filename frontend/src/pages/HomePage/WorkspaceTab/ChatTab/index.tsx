@@ -1,4 +1,4 @@
-import { ChangeEvent, useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 
 import { Button, TextField } from "@mui/material";
 
@@ -9,15 +9,37 @@ import Loader from "../../../../components/Loader";
 
 type QuestionAndAnswer = { question: string; answer: string };
 
+type ConversationHistory = {
+  role: "user" | "assistant";
+  content: string;
+};
+
 const ChatTab = () => {
   const { homePageData, setHomePageData } = useHomePageContext();
-  const { loadingMessage, suggestedQuestion } = homePageData || {};
+  const {
+    loadingMessage,
+    suggestedQuestion,
+    extractedFilesData,
+    hasExtractedFiles,
+    chat = [],
+  } = homePageData || {};
+  const {
+    csv = [],
+    docx = [],
+    excel = [],
+    pdfs = [],
+  } = extractedFilesData || {};
+
+  console.log(homePageData);
+
+  const endRef = useRef<HTMLDivElement | null>(null);
 
   const [questionVal, setQuestionVal] = useState("");
   const [finalAnswer, setFinalAnswer] = useState("");
-  const [token, setToken] = useState(
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InByYXZlZW4ua3VtYXJAZ3JhbWVuZXIuY29tIn0.x396P1tXJBjZaji4y4SFwsWdbiHfcpzNXOfKM64k4qs"
-  );
+  const [token, setToken] = useState("");
+  const [conversationHistory, setConversationHistory] = useState<
+    ConversationHistory[]
+  >([]);
 
   useEffect(() => {
     const fetchToken = async () => {
@@ -28,13 +50,13 @@ const ChatTab = () => {
             withCredentials: true,
           }
         );
-        // console.log(response.data);
+        const token = response.data?.token;
 
-        // if (!token) {
-        //   window.location.href = `https://llmfoundry.straive.com?redirect=${window.location.href}`;
-        // } else {
-        //   setToken(token);
-        // }
+        if (!token) {
+          window.location.href = `https://llmfoundry.straive.com?redirect=${window.location.href}`;
+        } else {
+          setToken(token);
+        }
       } catch (error: any) {
         throw new Error(error.message);
       }
@@ -75,16 +97,43 @@ const ChatTab = () => {
     }
   };
 
-  const getExperts = async (q: string) => {
+  const addToHistory = (message: string, isUser = true) => {
+    setConversationHistory((prevVal) => [
+      ...prevVal,
+      {
+        role: isUser ? "user" : "assistant",
+        content: message,
+      },
+    ]);
+  };
+
+  const getConversationContext = () => {
+    return conversationHistory
+      .map((msg) => `${msg.role.toUpperCase()}: ${msg.content}`)
+      .join("\n\n");
+  };
+
+  const getExperts = async (question: string) => {
     setHomePageData?.((prevVal) => ({
       ...prevVal,
       loadingMessage: "Identifying expert panel...",
     }));
     const systemPrompt = `
     You are an assistant tasked with identifying 3 experts for a roundtable discussion
-    on a specific question. For the given question, suggest 3 distinct experts who would
+    on a specific question. These experts should be relevant to analyzing and answering questions about the provided documents.
+    
+    Consider the full conversation history when selecting experts, as the current question may relate to previous discussion points.
+    
+    For the given question, conversation history, and document context, suggest 3 distinct experts who would
     have valuable perspectives on the topic. Each expert should have different specialties
     and backgrounds to ensure diverse insights.
+
+    The experts should be able to analyze and interpret:
+    - Document content and structure
+    - Data patterns and relationships
+    - Technical and domain-specific aspects
+    - Contextual information
+    - Previous conversation points and their relationships
 
     Provide your response in JSON format with the following structure:
     {
@@ -92,7 +141,7 @@ const ChatTab = () => {
         {
           "title": "Expert's title/profession",
           "specialty": "Expert's area of expertise",
-          "background": "Brief 1-2 sentence background on why this expert is relevant and what they bring to the table with respect to the question"
+          "background": "Brief 1-2 sentence background on why this expert is relevant and what they bring to the table with respect to the question, documents, and conversation history"
         },
         {...},
         {...}
@@ -100,73 +149,145 @@ const ChatTab = () => {
     }
   `;
 
-    const result = await callOpenAI(systemPrompt, q);
+    const conversationContext = getConversationContext();
+    const userMessage = `
+    Question: ${question}
+
+    Previous Conversation:
+    ${conversationContext}
+
+    Available document content:
+    ${pdfs
+      .map((pdf) => `PDF: ${pdf.filename}\nContent: ${pdf.content}`)
+      .join("\n\n")}
+    ${excel
+      .map(
+        (excel) =>
+          `Excel: ${excel.filename}\nContent: ${JSON.stringify(excel.content)}`
+      )
+      .join("\n\n")}
+    ${csv
+      .map(
+        (csv) => `CSV: ${csv.filename}\nContent: ${JSON.stringify(csv.content)}`
+      )
+      .join("\n\n")}
+    ${docx
+      .map((docx) => `DOCX: ${docx.filename}\nContent: ${docx.content}`)
+      .join("\n\n")}
+  `;
+
+    console.log(userMessage);
+
+    const result = await callOpenAI(systemPrompt, question);
     return JSON.parse(result).experts;
   };
 
   const generateExpertQuestions = async (question: string, expert: Expert) => {
     const systemPrompt = `
     You are an assistant tasked with generating 3 insightful questions related to the user's
-    main question. These questions should be specialized for ${expert.name}, a ${expert.title}
+    main question. These questions should be specialized for ${expert.title}
     with expertise in ${expert.specialty}.
 
-    Generate questions that leverage this expert's unique perspective and knowledge. Each
-    question should help address different aspects of the main question.
+    Generate questions that:
+    1. Leverage this expert's unique perspective and knowledge
+    2. Focus on analyzing and interpreting the provided document content
+    3. Help extract meaningful insights from the available data
+    4. Address specific aspects of the user's question in relation to the documents
 
-    Provide your response in JSON format:
-    {
-      "questions": [
-        "First specialized question for the expert",
-        "Second specialized question for the expert",
-        "Third specialized question for the expert"
-      ]
-    }
+    Your questions should be clear, specific, and directly related to the content of the uploaded documents.
   `;
 
-    const result = await callOpenAI(systemPrompt, question);
-    return JSON.parse(result).questions;
+    const documentContext = `
+    Available document content:
+    ${pdfs
+      .map((pdf) => `PDF: ${pdf.filename}\nContent: ${pdf.content}`)
+      .join("\n\n")}
+    ${excel
+      .map(
+        (excel) =>
+          `Excel: ${excel.filename}\nContent: ${JSON.stringify(excel.content)}`
+      )
+      .join("\n\n")}
+    ${csv
+      .map(
+        (csv) => `CSV: ${csv.filename}\nContent: ${JSON.stringify(csv.content)}`
+      )
+      .join("\n\n")}
+    ${docx
+      .map((docx) => `DOCX: ${docx.filename}\nContent: ${docx.content}`)
+      .join("\n\n")}
+  `;
+
+    try {
+      const response = await callOpenAI(
+        systemPrompt,
+        `Question: ${question}\n\nDocument Context:\n${documentContext}\n\nExpert Background: ${expert.background}`
+      );
+      return response.split("\n").filter((q: string) => q.trim());
+    } catch (error: any) {
+      throw new Error(
+        `Failed to generate questions for ${expert.title}: ${error.message}`
+      );
+    }
   };
 
   const getExpertAnswers = async (
-    q: string,
+    question: string,
     expert: any,
-    questions: string[]
+    expertQuestions: string[]
   ) => {
     const systemPrompt = `
-    You are ${expert.name}, a ${expert.title} with expertise in ${expert.specialty}.
+    You are ${expert.title}, an expert in ${expert.specialty}. 
     ${expert.background}
 
-    Please provide your expert answers to the following questions based on your
-    specialized knowledge and perspective. Be insightful and specific, drawing
-    on your expertise.
-
-    Format your response as JSON:
-    {
-      "answers": [
-        "Answer to first question",
-        "Answer to second question",
-        "Answer to third question"
-      ]
-    }
+    Answer the following questions based on your expertise and the provided document content.
+    Your answers should:
+    1. Be directly based on the content from the uploaded documents
+    2. Reference specific data points or sections from the documents
+    3. Provide clear, factual responses supported by the available information
+    4. Stay focused on your area of expertise while analyzing the document content
   `;
-    const userMessage = `
-      Main topic: ${q}
-      Questions:
-      1. ${questions[0]}
-      2. ${questions[1]}
-      3. ${questions[2]}
-    `;
 
-    const result = await callOpenAI(systemPrompt, userMessage);
-    const sanitizedResult = result.replace(/,(\s*])/, "$1");
+    const documentContext = `
+    Available document content:
+    ${pdfs
+      .map((pdf) => `PDF: ${pdf.filename}\nContent: ${pdf.content}`)
+      .join("\n\n")}
+    ${excel
+      .map(
+        (excel) =>
+          `Excel: ${excel.filename}\nContent: ${JSON.stringify(excel.content)}`
+      )
+      .join("\n\n")}
+    ${csv
+      .map(
+        (csv) => `CSV: ${csv.filename}\nContent: ${JSON.stringify(csv.content)}`
+      )
+      .join("\n\n")}
+    ${docx
+      .map((docx) => `DOCX: ${docx.filename}\nContent: ${docx.content}`)
+      .join("\n\n")}
+  `;
 
-    return JSON.parse(sanitizedResult).answers;
+    try {
+      const response = await callOpenAI(
+        systemPrompt,
+        `Main Question: ${question}\n\nDocument Context:\n${documentContext}\n\nQuestions to Answer:\n${expertQuestions.join(
+          "\n"
+        )}`
+      );
+      return response.split("\n").filter((a: string) => a.trim());
+    } catch (error: any) {
+      throw new Error(
+        `Failed to get answers from ${expert.title}: ${error.message}`
+      );
+    }
   };
 
   const generateExpertSummary = async (
-    q: string,
+    question: string,
     expert: any,
-    qas: { question: string; answer: string }[]
+    questionsAndAnswers: { question: string; answer: string }[]
   ) => {
     const systemPrompt = `
     You are an assistant tasked with summarizing the insights provided by ${expert.name},
@@ -177,38 +298,191 @@ const ChatTab = () => {
 
     The summary should be 2-3 paragraphs and highlight the unique perspective this expert brings.
   `;
-    const userMessage = `
-      Main question: ${q}
-      Expert: ${expert.name}, ${expert.title}
-      Q&A: ${qas.map((qa) => `Q: ${qa.question}\nA: ${qa.answer}`).join("\n\n")}
-    `;
 
-    return await callOpenAI(systemPrompt, userMessage);
+    const userMessage = `
+    Main question: ${question}
+
+    Expert: ${expert.name}, ${expert.title}
+    Specialty: ${expert.specialty}
+    Background: ${expert.background}
+
+    Q&A:
+    ${questionsAndAnswers
+      .map((qa) => `Q: ${qa.question}\nA: ${qa.answer}`)
+      .join("\n\n")}
+  `;
+
+    try {
+      return await callOpenAI(systemPrompt, userMessage);
+    } catch (error: any) {
+      throw new Error(
+        `Failed to generate summary for ${expert.name}: ${error.message}`
+      );
+    }
   };
 
-  const generateFinalAnswer = async (q: string, data: Expert[]) => {
+  const extractMermaidCode = (response: any) => {
+    try {
+      const mermaidMatch = response.match(/```mermaid\s*([\s\S]*?)```/i);
+      if (!mermaidMatch || !mermaidMatch[1]) {
+        console.warn("No mermaid code block found in response");
+        return null;
+      }
+      const code = mermaidMatch[1].trim();
+      if (!code.startsWith("mindmap")) {
+        console.warn("Invalid mindmap code - does not start with mindmap");
+        return null;
+      }
+      return code;
+    } catch (error) {
+      console.error("Error extracting mermaid code:", error);
+      return null;
+    }
+  };
+
+  const generateFinalAnswer = async (
+    question: string,
+    expertsData: Expert[]
+  ) => {
     setHomePageData?.((prevVal) => ({
       ...prevVal,
       loadingMessage: "Synthesizing final answer...",
     }));
     const systemPrompt = `
-    You are an assistant tasked with synthesizing insights from multiple experts to provide
-    a comprehensive answer to the user's original question.
-
-    Review the summaries from each expert and create a well-structured final answer that:
-    1. Integrates the key insights from all experts
-    2. Highlights areas of consensus and different perspectives
-    3. Directly addresses the original question with depth and nuance
-    4. Provides a balanced, holistic response
-
-    Your answer should be 3-5 paragraphs and should feel like a conclusion to a thoughtful
-    roundtable discussion among experts.
+    You are an assistant tasked with synthesizing expert insights into a comprehensive answer.
+    Consider the full conversation history when formulating your response, as the current question
+    may relate to or build upon previous exchanges.
+    
+    Your response should:
+    1. Address the current question directly
+    2. Reference relevant points from previous conversation
+    3. Integrate expert insights and document evidence
+    4. Maintain consistency with previous answers
+    5. Clarify any relationships with previous topics discussed
   `;
-    const userMessage = `Original question: ${q}\n\n${data
-      .map((e) => `Expert: ${e.name}, ${e.title}\nSummary: ${e.summary}`)
-      .join("\n\n")}`;
 
-    return await callOpenAI(systemPrompt, userMessage);
+    const conversationContext = getConversationContext();
+    const userMessage = `
+    Current Question: ${question}
+
+    Previous Conversation:
+    ${conversationContext}
+
+    Expert Insights:
+    ${expertsData
+      .map(
+        (expert) => `
+        Expert: ${expert.title} (${expert.specialty})
+        Background: ${expert.background}
+        Key Questions and Answers:
+        ${expert.questionsAndAnswers
+          .map((qa) => `Q: ${qa.question}\nA: ${qa.answer}`)
+          .join("\n")}
+        Summary: ${expert.summary}
+      `
+      )
+      .join("\n\n")}
+
+    Document Context:
+    ${pdfs
+      .map((pdf) => `PDF: ${pdf.filename}\nContent: ${pdf.content}`)
+      .join("\n\n")}
+    ${excel
+      .map(
+        (excel) =>
+          `Excel: ${excel.filename}\nContent: ${JSON.stringify(excel.content)}`
+      )
+      .join("\n\n")}
+    ${csv
+      .map(
+        (csv) => `CSV: ${csv.filename}\nContent: ${JSON.stringify(csv.content)}`
+      )
+      .join("\n\n")}
+    ${docx
+      .map((docx) => `DOCX: ${docx.filename}\nContent: ${docx.content}`)
+      .join("\n\n")}
+  `;
+
+    try {
+      return await callOpenAI(systemPrompt, userMessage);
+    } catch (error: any) {
+      throw new Error(`Failed to generate final answer: ${error.message}`);
+    }
+  };
+
+  const handleSubmit = async (e?: FormEvent<HTMLFormElement>) => {
+    e?.preventDefault();
+    if (!questionVal && !suggestedQuestion) return;
+
+    const question = suggestedQuestion || questionVal;
+    setQuestionVal("");
+    addToHistory(question, true);
+    setHomePageData?.((prev) => ({
+      ...prev,
+      loadingMessage: "Processing question...",
+      chat: [...(prev.chat || []), { message: question, isUser: true }],
+    }));
+
+    try {
+      const experts = await getExperts(question);
+
+      const enrichedExperts: Expert[] = [];
+      for (const expert of experts) {
+        const expertQuestions = await generateExpertQuestions(question, expert);
+        const expertAnswers = await getExpertAnswers(
+          question,
+          expert,
+          expertQuestions
+        );
+
+        const qa: QuestionAndAnswer[] = expertQuestions.map(
+          (questionVal: string, index: number) => ({
+            question: questionVal,
+            answer: expertAnswers[index] || "No answer",
+          })
+        );
+
+        const summary = await generateExpertSummary(question, expert, qa);
+
+        const mindmap = await generateExpertMindmapWithLLM(
+          question,
+          expert,
+          qa,
+          finalAnswer
+        );
+
+        enrichedExperts.push({
+          ...expert,
+          questionsAndAnswers: qa,
+          summary,
+          mindmap,
+        });
+      }
+
+      const final = await generateFinalAnswer(question, enrichedExperts);
+      setFinalAnswer(final);
+      addToHistory(final, false);
+
+      const insightQuestions = await generateFollowUpQuestions(
+        questionVal,
+        final
+      );
+
+      setHomePageData?.((prev) => ({
+        ...prev,
+        loadingMessage: "",
+        insightQuestions,
+        chat: [...(prev.chat || []), { message: final, isUser: false }],
+        suggestedQuestion: "",
+        experts: enrichedExperts,
+      }));
+    } catch (error: any) {
+      console.error("Error during question processing:", error);
+      setHomePageData?.((prev) => ({
+        ...prev,
+        loadingMessage: "Error occurred. Try again.",
+      }));
+    }
   };
 
   const generateExpertMindmapWithLLM = async (
@@ -218,93 +492,117 @@ const ChatTab = () => {
     finalAnswer: string
   ) => {
     const systemPrompt = `
-You are an assistant tasked with visualizing an expert's reasoning process as a mind map.
+You are an assistant tasked with creating a Mermaid mindmap visualization. You must follow these rules exactly:
 
-Given:
-- The main question: "${question}"
-- The expert's background: "${expert.background}"
-- The expert's specialized questions and answers:
+1. Start with \`\`\`mermaid followed by a newline
+2. The next line must be exactly: mindmap
+3. Use only ASCII characters (no Unicode or special characters)
+4. Use proper indentation with spaces (2 spaces per level)
+5. Root node must use (( )) notation
+6. Follow this exact structure:
+
+\`\`\`mermaid
+mindmap
+  root((Main Topic))
+    Topic1
+      Subtopic1
+      Subtopic2
+    Topic2
+      Subtopic3
+      Subtopic4
+\`\`\`
+
+Create a mindmap that shows this expert's analysis process, key findings, and relationship to the final answer.
+ONLY output the mermaid code block, nothing else.`;
+
+    const userMessage = `
+Expert: ${expert.title} (${expert.specialty})
+Background: ${expert.background}
+
+Question Asked: ${question}
+
+Expert's Q&A Process:
 ${questionsAndAnswers
-  .map(
-    (qa, idx) => `  Q${idx + 1}: ${qa.question}\n  A${idx + 1}: ${qa.answer}`
-  )
-  .join("\n")}
-- The final answer synthesized from all experts: "${finalAnswer}"
+  .map((qa, i) => `Q${i + 1}: ${qa.question}\nA${i + 1}: ${qa.answer}`)
+  .join("\n\n")}
 
-Create a Mermaid Mindmap (inside a \`\`\`mermaid code block) that best represents this expert's thinking, their contributions, and their relationship to the final answer. Use your judgment to structure the mindmap for clarity and insight. Only output the Mermaid code block.`;
-    const result = await callOpenAI(systemPrompt, "");
-    const match = result.match(/```mermaid\s*([\s\S]*?)```/);
-    return match ? match[1].trim() : "";
+Expert's Summary: ${expert.summary}
+
+Final Answer: ${finalAnswer}
+
+Remember:
+1. Use the expert's title as the root node
+2. Branch out into their key findings
+3. Show how their analysis connects to the final answer
+4. Keep text concise and clear
+5. Use only ASCII characters`;
+
+    try {
+      const response = await callOpenAI(systemPrompt, userMessage);
+      return extractMermaidCode(response);
+    } catch (error) {
+      console.error(`Failed to generate mindmap for ${expert.title}:`, error);
+      return null;
+    }
   };
 
-  const handleSubmit = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    const userQuestion = suggestedQuestion || questionVal;
+  const generateFollowUpQuestions = async (
+    question: string,
+    finalAnswer: string
+  ) => {
+    const systemPrompt = `
+      You are an assistant tasked with generating 3 relevant follow-up questions based on the current conversation.
+      The questions should:
+      1. Build upon the current discussion
+      2. Explore interesting angles not yet covered
+      3. Dive deeper into specific aspects mentioned
+      4. Be clear and concise
+      5. Be diverse in their focus
+  
+      Return exactly 3 questions in JSON format:
+      {
+        "questions": [
+          {
+            "text": "Question text here",
+            "context": "Brief explanation of why this is a relevant follow-up"
+          },
+          {...},
+          {...}
+        ]
+      }
+    `;
 
-    setHomePageData?.((prevVal) => ({
-      ...prevVal,
-      loadingMessage: "Processing your question...",
-      experts: [],
-    }));
+    const conversationContext = getConversationContext();
+    const userMessage = `
+      Current Question: ${question}
+      Final Answer: ${finalAnswer}
+  
+      Previous Conversation:
+      ${conversationContext}
+    `;
+
     try {
-      const exps = await getExperts(userQuestion);
-      const expertsData: Expert[] = [];
-      for (const [i, expert] of exps.entries()) {
-        expert.name = expert.name || `Expert ${i + 1}`;
-        const questions = await generateExpertQuestions(userQuestion, expert);
-        const answers = await getExpertAnswers(userQuestion, expert, questions);
-        const qas = questions.map((q, idx) => ({
-          question: q,
-          answer: answers[idx],
-        }));
+      const response = await callOpenAI(systemPrompt, userMessage);
 
-        const summary = await generateExpertSummary(userQuestion, expert, qas);
-
-        expertsData.push({
-          ...expert,
-          questions,
-          answers,
-          summary,
-          questionsAndAnswers: qas,
-          mermaid: "",
-        });
-      }
-      const finalAns = await generateFinalAnswer(userQuestion, expertsData);
-      for (const expert of expertsData) {
-        expert.mermaid = await generateExpertMindmapWithLLM(
-          userQuestion,
-          expert,
-          expert.questionsAndAnswers,
-          finalAns
-        );
-      }
-      setHomePageData?.((prevVal) => ({
-        ...prevVal,
-        loadingMessage: "",
-        suggestedQuestion: "",
-        experts: expertsData,
-        chat: [
-          ...(homePageData?.chat || []),
-          { isUser: true, message: userQuestion },
-          { isUser: false, message: finalAns },
-        ],
-      }));
-      setFinalAnswer(finalAns);
-
-      setQuestionVal("");
-    } catch (error: any) {
-      throw new Error(error.message);
+      return JSON.parse(response).questions;
+    } catch (error) {
+      console.error("Failed to generate follow-up questions:", error);
+      return [];
     }
   };
 
   const onQuestion = (event: ChangeEvent<HTMLInputElement>) =>
     setQuestionVal(event?.target?.value);
 
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chat]);
+
   return (
     <>
       <div className="flex-1 flex flex-col gap-3 overflow-auto bg-gray-100 rounded p-3">
         <div className="flex-1 bg-white border border-gray-200 overflow-auto rounded p-2">
-          {homePageData?.chat?.map((data, index) => (
+          {chat?.map((data, index) => (
             <div
               className={`flex mb-5 ${data.isUser ? "justify-end" : ""}`}
               key={index}
@@ -318,6 +616,8 @@ Create a Mermaid Mindmap (inside a \`\`\`mermaid code block) that best represent
               </p>
             </div>
           ))}
+          <div ref={endRef} />
+          {/* dummy div ensures scrolling to bottom */}
         </div>
 
         <form onSubmit={handleSubmit}>
@@ -328,6 +628,8 @@ Create a Mermaid Mindmap (inside a \`\`\`mermaid code block) that best represent
               fullWidth
               onChange={onQuestion}
               value={questionVal}
+              disabled={!hasExtractedFiles}
+              required
             />
             <Button
               style={{
@@ -339,6 +641,7 @@ Create a Mermaid Mindmap (inside a \`\`\`mermaid code block) that best represent
               className="w-40"
               variant="contained"
               type="submit"
+              disabled={!hasExtractedFiles}
             >
               Send
             </Button>

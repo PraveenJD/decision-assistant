@@ -1,6 +1,9 @@
 import { ReactNode, useState } from "react";
 
+import * as XLSX from "xlsx";
+
 import { HomePageContext } from "./useHomePage";
+import { ExtractedFileData } from "../../pages/HomePage/SettingsAndInsightsTab/FileUpload";
 
 export type Expert = {
   name: string;
@@ -12,6 +15,7 @@ export type Expert = {
   summary: string;
   questionsAndAnswers: { question: string; answer: string }[];
   mermaid: string;
+  mindmap?: string;
 };
 export type Chat = {
   isUser: boolean;
@@ -26,15 +30,31 @@ const defaultChatVal = [
   },
 ];
 
+type HomePageProviderProps = {
+  children: ReactNode;
+};
+
+export type ExtractedFilesData = {
+  pdfs: { filename: string; content: string }[];
+  excel: { filename: string; content: XLSX.WorkBook }[];
+  csv: { filename: string; content: any }[];
+  docx: { filename: string; content: string }[];
+};
+
+type InsightQuestions = {
+  text: string;
+  context: string;
+};
+
 export type HomePageType = {
   loadingMessage?: string;
   experts?: Expert[];
   chat?: Chat[];
   suggestedQuestion?: string;
-};
-
-type HomePageProviderProps = {
-  children: ReactNode;
+  extractedFilesData?: ExtractedFilesData;
+  hasExtractedFiles?: boolean;
+  insightQuestions?: InsightQuestions[];
+  tableData?: ExtractedFileData[];
 };
 
 export const homePageDefaultValues = {
@@ -42,6 +62,15 @@ export const homePageDefaultValues = {
   experts: [],
   chat: defaultChatVal,
   suggestedQuestion: "",
+  extractedFilesData: {
+    pdfs: [],
+    excel: [],
+    csv: [],
+    docx: [],
+  },
+  hasExtractedFiles: false,
+  insightQuestions: [],
+  tableData: [],
 };
 
 export const HomePageProvider = ({ children }: HomePageProviderProps) => {
